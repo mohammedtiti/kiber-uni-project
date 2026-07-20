@@ -1,0 +1,23 @@
+{
+   "ActiveEmotionalView":"Default View",
+   "Default View_ScaleFactor":"0.764988",
+   "Default View_TopLeft":"-416,3",
+   "ExpandedHierarchyInLayout":"",
+   "guistr":"# # String gsaved with Nlview 7.5.8 2022-09-21 7111 VDI=41 GEI=38 GUI=JA:10.0
+#  -string -flagsOSRD
+preplace port port-id_clk_0 -pg 1 -lvl 0 -x 0 -y 220 -defaultsOSRD
+preplace inst butterfly_k2red_kyber_0 -pg 1 -lvl 2 -x 490 -y 90 -defaultsOSRD
+preplace inst vio_0 -pg 1 -lvl 1 -x 170 -y 310 -defaultsOSRD
+preplace inst ila_0 -pg 1 -lvl 2 -x 490 -y 280 -defaultsOSRD
+preplace netloc vio_0_probe_out0 1 1 1 310 60n
+preplace netloc vio_0_probe_out1 1 1 1 320 80n
+preplace netloc vio_0_probe_out2 1 1 1 330 100n
+preplace netloc vio_0_probe_out3 1 1 1 340 120n
+preplace netloc butterfly_k2red_kyber_0_out1 1 0 3 20 410 360 410 620
+preplace netloc butterfly_k2red_kyber_0_out0 1 0 3 30 400 350 400 630
+preplace netloc clk_0_1 1 0 2 30 220 N
+levelinfo -pg 1 0 170 490 650
+pagesize -pg 1 -db -bbox -sgen -80 0 650 420
+"
+}
+

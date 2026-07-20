@@ -1,0 +1,7 @@
+part=xc7a35tcpg236-1
+constraint_ns=4.000
+wns_ns=-58.265
+estimated_period_ns=62.265
+estimated_fmax_mhz=16.060387055328032
+startpoint=u_datapath/u_ram_b/ram_reg/CLKARDCLK
+endpoint=u_datapath/u_ram_c/ram_reg/DIADI[9]
