@@ -4,12 +4,9 @@ Vivado university project for Kyber/NTT hardware design work.
 
 ## Repository Layout
 
-- `Design Sources/` - Verilog/SystemVerilog design modules, memory initialization data, Vivado block designs, and IP metadata.
-- `Constraints/` - Vivado XDC constraint files.
-- `Simulation Sources/` - Testbenches and simulation-only sources.
-- `Utility Sources/` - Vivado utility/imported implementation artifacts.
-- `Reports/` - Timing, utilization, and clock information reports.
-- `Vivado Project/` - Original Vivado project file.
+- `Design Sources/` - Verilog/SystemVerilog design modules only.
+- `Constraints/` - Vivado XDC constraint file.
+- `Simulation Sources/` - Verilog/SystemVerilog testbenches and simulation-only sources only.
 
 ## Main Design Files
 
@@ -25,4 +22,4 @@ Vivado university project for Kyber/NTT hardware design work.
 
 ## Notes
 
-Generated Vivado output directories such as runs, cache, simulation output, and logs are intentionally excluded from Git.
+Vivado project files, generated output, reports, logs, and utility artifacts are intentionally excluded from this repository.
