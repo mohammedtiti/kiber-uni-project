@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 // KRED for Kyber (q=3329, k=13, m=8)
 // Input:  C[23:0]
 // Output: D_raw is SIGNED and satisfies D_raw ≡ 13*C (mod 3329)

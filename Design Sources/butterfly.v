@@ -1,3 +1,5 @@
+`timescale 1ns / 1ps
+
 // Reconfigurable butterfly using K2-RED (Kyber q=3329).
 //
 // mode = 0 : CT butterfly for NTT
