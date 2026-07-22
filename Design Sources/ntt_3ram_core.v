@@ -1,9 +1,7 @@
 `timescale 1ns / 1ps
 
-// Top-level core: controller FSM + 3-RAM datapath.
-//
-// Use load_* while busy=0 to initialize RAM A/B, or RAM C for tests.
-// Then pulse start for one clock. done pulses when INTT(C) is complete.
+// Kyber polynomial-multiplication core.  Inputs A and B are ordinary
+// coefficients in [0,3328].  After done, RAM C contains A*B mod (x^256+1,3329).
 module ntt_3ram_core #(
     parameter AW = 8,
     parameter DW = 12,
@@ -11,21 +9,21 @@ module ntt_3ram_core #(
     parameter RAM_A_MEMFILE = "",
     parameter RAM_B_MEMFILE = "",
     parameter RAM_C_MEMFILE = "",
-    parameter TW_MEMFILE = "twiddle_k2red.mem"
+    parameter TW_MEMFILE = ""
 )(
     input  wire              clk,
     input  wire              rst,
     input  wire              start,
 
     input  wire              load_en,
-    input  wire [1:0]        load_ram_sel,   // 0=A, 1=B, 2=C
+    input  wire [1:0]        load_ram_sel,
     input  wire [AW-1:0]     load_addr0,
     input  wire [AW-1:0]     load_addr1,
     input  wire [DW-1:0]     load_data0,
     input  wire [DW-1:0]     load_data1,
 
     input  wire              host_rd_en,
-    input  wire [1:0]        host_rd_ram_sel, // 0=A, 1=B, 2=C
+    input  wire [1:0]        host_rd_ram_sel,
     input  wire [AW-1:0]     host_rd_addr0,
     input  wire [AW-1:0]     host_rd_addr1,
 
@@ -35,156 +33,126 @@ module ntt_3ram_core #(
     output wire [2:0]        phase_dbg,
     output wire [1:0]        pass_dbg,
     output wire [6:0]        op_dbg,
-
     output wire [DW-1:0]     ram_rd0,
     output wire [DW-1:0]     ram_rd1,
     output wire [DW-1:0]     mul_out0,
     output wire [DW-1:0]     mul_out1
 );
+    wire core_active;
+    wire [AW-1:0] core_addr0, core_addr1;
+    wire core_wr_en;
+    wire [1:0] core_wr_ram_sel;
+    wire [DW-1:0] core_wr_data0, core_wr_data1;
 
-    wire              f_mode_in;
-    wire              f_rd_en;
-    wire [1:0]        f_rd_src_sel;
-    wire [AW-1:0]     f_rd_addr0;
-    wire [AW-1:0]     f_rd_addr1;
-    wire              f_rd_capture_en;
-    wire              f_rd_capture_sel;
-    wire              f_wr_en;
-    wire [1:0]        f_wr_dst_sel;
-    wire [AW-1:0]     f_wr_addr0;
-    wire [AW-1:0]     f_wr_addr1;
-    wire              f_wr_result_sel;
-    wire              f_mul_rd_en;
-    wire              f_mul_wr_en;
-    wire [AW-1:0]     f_mul_addr0;
-    wire [AW-1:0]     f_mul_addr1;
-    wire [TW_AW-1:0]  f_tw_addr_s0_b0;
-    wire [TW_AW-1:0]  f_tw_addr_s0_b1;
-    wire [TW_AW-1:0]  f_tw_addr_s1_b0;
-    wire [TW_AW-1:0]  f_tw_addr_s1_b1;
-    wire              f_tw_force_neg_s0_b0;
-    wire              f_tw_force_neg_s0_b1;
-    wire              f_tw_force_neg_s1_b0;
-    wire              f_tw_force_neg_s1_b1;
-    wire              f_tw_load;
-    wire              f_bf_start;
+    wire [DW-1:0] ram_a_rd0, ram_a_rd1;
+    wire [DW-1:0] ram_b_rd0, ram_b_rd1;
+    wire [DW-1:0] ram_c_rd0, ram_c_rd1;
 
-    wire              bf_valid;
-    wire              mul_valid;
-    wire              ram_conflict;
-    wire              load_active = (load_en === 1'b1) && (busy !== 1'b1);
-    wire              host_rd_active = (host_rd_en === 1'b1) && (busy !== 1'b1) && !load_active;
+    wire block_mode;
+    wire block_two_stage;
+    wire [DW-1:0] block_in0, block_in1, block_in2, block_in3;
+    wire [DW-1:0] block_out0, block_out1, block_out2, block_out3;
+    wire [6:0] block_tw_addr0, block_tw_addr1;
+    wire [6:0] block_tw_addr2, block_tw_addr3;
+    wire [11:0] block_tw0, block_tw1, block_tw2, block_tw3;
+    wire [6:0] tw_addr;
+    wire tw_negate;
+    wire [11:0] tw_zeta;
 
-    wire              dp_wr_en = load_active ? 1'b1 : f_wr_en;
-    wire [1:0]        dp_wr_dst_sel = load_active ? load_ram_sel : f_wr_dst_sel;
-    wire [AW-1:0]     dp_wr_addr0 = load_active ? load_addr0 : f_wr_addr0;
-    wire [AW-1:0]     dp_wr_addr1 = load_active ? load_addr1 : f_wr_addr1;
-    wire              dp_wr_result_sel = load_active ? 1'b0 : f_wr_result_sel;
-    wire              dp_wr_use_ext = load_active;
-    wire [DW-1:0]     dp_wr_ext0 = load_data0;
-    wire [DW-1:0]     dp_wr_ext1 = load_data1;
+    wire [DW-1:0] mul_a0, mul_b0, mul_a1, mul_b1;
 
-    wire              dp_rd_en = host_rd_active ? 1'b1 : f_rd_en;
-    wire [1:0]        dp_rd_src_sel = host_rd_active ? host_rd_ram_sel : f_rd_src_sel;
-    wire [AW-1:0]     dp_rd_addr0 = host_rd_active ? host_rd_addr0 : f_rd_addr0;
-    wire [AW-1:0]     dp_rd_addr1 = host_rd_active ? host_rd_addr1 : f_rd_addr1;
-
-    ntt_3ram_fsm #(.AW(AW), .TW_AW(TW_AW)) u_fsm (
-        .clk(clk),
-        .rst(rst),
-        .start(start),
-        .bf_valid(bf_valid),
-        .mul_valid(mul_valid),
-        .ram_conflict(ram_conflict),
-        .mode_in(f_mode_in),
-        .rd_en(f_rd_en),
-        .rd_src_sel(f_rd_src_sel),
-        .rd_addr0(f_rd_addr0),
-        .rd_addr1(f_rd_addr1),
-        .rd_capture_en(f_rd_capture_en),
-        .rd_capture_sel(f_rd_capture_sel),
-        .wr_en(f_wr_en),
-        .wr_dst_sel(f_wr_dst_sel),
-        .wr_addr0(f_wr_addr0),
-        .wr_addr1(f_wr_addr1),
-        .wr_result_sel(f_wr_result_sel),
-        .mul_rd_en(f_mul_rd_en),
-        .mul_wr_en(f_mul_wr_en),
-        .mul_addr0(f_mul_addr0),
-        .mul_addr1(f_mul_addr1),
-        .tw_addr_s0_b0(f_tw_addr_s0_b0),
-        .tw_addr_s0_b1(f_tw_addr_s0_b1),
-        .tw_addr_s1_b0(f_tw_addr_s1_b0),
-        .tw_addr_s1_b1(f_tw_addr_s1_b1),
-        .tw_force_neg_s0_b0(f_tw_force_neg_s0_b0),
-        .tw_force_neg_s0_b1(f_tw_force_neg_s0_b1),
-        .tw_force_neg_s1_b0(f_tw_force_neg_s1_b0),
-        .tw_force_neg_s1_b1(f_tw_force_neg_s1_b1),
-        .tw_load(f_tw_load),
-        .bf_start(f_bf_start),
-        .busy(busy),
-        .done(done),
-        .error(error),
-        .phase_dbg(phase_dbg),
-        .pass_dbg(pass_dbg),
-        .op_dbg(op_dbg)
-    );
+    wire load_allowed = load_en && !busy;
+    wire read_allowed = host_rd_en && !busy && !load_en;
 
     ntt_3ram_datapath #(
-        .AW(AW),
-        .DW(DW),
-        .TW_AW(TW_AW),
+        .AW(AW), .DW(DW),
         .RAM_A_MEMFILE(RAM_A_MEMFILE),
         .RAM_B_MEMFILE(RAM_B_MEMFILE),
-        .RAM_C_MEMFILE(RAM_C_MEMFILE),
-        .TW_MEMFILE(TW_MEMFILE)
+        .RAM_C_MEMFILE(RAM_C_MEMFILE)
     ) u_datapath (
         .clk(clk),
-        .rst(rst),
-        .mode_in(f_mode_in),
-        .rd_en(dp_rd_en),
-        .rd_src_sel(dp_rd_src_sel),
-        .rd_addr0(dp_rd_addr0),
-        .rd_addr1(dp_rd_addr1),
-        .rd_capture_en(f_rd_capture_en),
-        .rd_capture_sel(f_rd_capture_sel),
-        .wr_en(dp_wr_en),
-        .wr_dst_sel(dp_wr_dst_sel),
-        .wr_addr0(dp_wr_addr0),
-        .wr_addr1(dp_wr_addr1),
-        .wr_result_sel(dp_wr_result_sel),
-        .wr_use_ext(dp_wr_use_ext),
-        .wr_ext0(dp_wr_ext0),
-        .wr_ext1(dp_wr_ext1),
-        .mul_rd_en(f_mul_rd_en),
-        .mul_wr_en(f_mul_wr_en),
-        .mul_addr0(f_mul_addr0),
-        .mul_addr1(f_mul_addr1),
-        .mul_valid(mul_valid),
-        .mul_out0(mul_out0),
-        .mul_out1(mul_out1),
-        .tw_addr_s0_b0(f_tw_addr_s0_b0),
-        .tw_addr_s0_b1(f_tw_addr_s0_b1),
-        .tw_addr_s1_b0(f_tw_addr_s1_b0),
-        .tw_addr_s1_b1(f_tw_addr_s1_b1),
-        .tw_force_neg_s0_b0(f_tw_force_neg_s0_b0),
-        .tw_force_neg_s0_b1(f_tw_force_neg_s0_b1),
-        .tw_force_neg_s1_b0(f_tw_force_neg_s1_b0),
-        .tw_force_neg_s1_b1(f_tw_force_neg_s1_b1),
-        .tw_load(f_tw_load),
-        .bf_start(f_bf_start),
-        .bf_valid(bf_valid),
-        .coeff0(),
-        .coeff1(),
-        .coeff2(),
-        .coeff3(),
-        .bf_out0(),
-        .bf_out1(),
-        .bf_out2(),
-        .bf_out3(),
-        .ram_rd0(ram_rd0),
-        .ram_rd1(ram_rd1),
-        .ram_conflict(ram_conflict)
+        .core_active(core_active),
+        .core_addr0(core_addr0), .core_addr1(core_addr1),
+        .core_wr_en(core_wr_en), .core_wr_ram_sel(core_wr_ram_sel),
+        .core_wr_data0(core_wr_data0), .core_wr_data1(core_wr_data1),
+        .load_en(load_allowed), .load_ram_sel(load_ram_sel),
+        .load_addr0(load_addr0), .load_addr1(load_addr1),
+        .load_data0(load_data0), .load_data1(load_data1),
+        .host_rd_en(read_allowed), .host_rd_ram_sel(host_rd_ram_sel),
+        .host_rd_addr0(host_rd_addr0), .host_rd_addr1(host_rd_addr1),
+        .ram_a_rd0(ram_a_rd0), .ram_a_rd1(ram_a_rd1),
+        .ram_b_rd0(ram_b_rd0), .ram_b_rd1(ram_b_rd1),
+        .ram_c_rd0(ram_c_rd0), .ram_c_rd1(ram_c_rd1),
+        .host_rd_data0(ram_rd0), .host_rd_data1(ram_rd1)
     );
 
+    kyber_twiddle_rom u_twiddle (
+        .addr(tw_addr),
+        .negate(tw_negate),
+        .zeta(tw_zeta),
+        .zeta_scaled()
+    );
+
+    // Four independent scaled-twiddle lookups feed the integrated 2x2 block.
+    // Vivado can optimize the duplicated constant decode logic while retaining
+    // four arithmetic issue lanes.
+    kyber_twiddle_rom u_block_tw0 (
+        .addr(block_tw_addr0), .negate(1'b0),
+        .zeta(), .zeta_scaled(block_tw0)
+    );
+    kyber_twiddle_rom u_block_tw1 (
+        .addr(block_tw_addr1), .negate(1'b0),
+        .zeta(), .zeta_scaled(block_tw1)
+    );
+    kyber_twiddle_rom u_block_tw2 (
+        .addr(block_tw_addr2), .negate(1'b0),
+        .zeta(), .zeta_scaled(block_tw2)
+    );
+    kyber_twiddle_rom u_block_tw3 (
+        .addr(block_tw_addr3), .negate(1'b0),
+        .zeta(), .zeta_scaled(block_tw3)
+    );
+
+    ntt_2stage_4butterfly u_2x2_butterfly (
+        .clk(clk),
+        .mode_in(block_mode),
+        .two_stage_en(block_two_stage),
+        .in0(block_in0), .in1(block_in1),
+        .in2(block_in2), .in3(block_in3),
+        .tw_s0_b0(block_tw0), .tw_s0_b1(block_tw1),
+        .tw_s1_b0(block_tw2), .tw_s1_b1(block_tw3),
+        .out0(block_out0), .out1(block_out1),
+        .out2(block_out2), .out3(block_out3)
+    );
+
+    kyber_modmul u_mul0 (.a(mul_a0), .b(mul_b0), .r(mul_out0));
+    kyber_modmul u_mul1 (.a(mul_a1), .b(mul_b1), .r(mul_out1));
+
+    ntt_3ram_fsm #(.AW(AW), .DW(DW)) u_fsm (
+        .clk(clk), .rst(rst), .start(start),
+        .ram_a_rd0(ram_a_rd0), .ram_a_rd1(ram_a_rd1),
+        .ram_b_rd0(ram_b_rd0), .ram_b_rd1(ram_b_rd1),
+        .ram_c_rd0(ram_c_rd0), .ram_c_rd1(ram_c_rd1),
+        .block_out0(block_out0), .block_out1(block_out1),
+        .block_out2(block_out2), .block_out3(block_out3),
+        .mul_result0(mul_out0), .mul_result1(mul_out1),
+        .tw_zeta(tw_zeta),
+        .core_active(core_active),
+        .core_addr0(core_addr0), .core_addr1(core_addr1),
+        .core_wr_en(core_wr_en), .core_wr_ram_sel(core_wr_ram_sel),
+        .core_wr_data0(core_wr_data0), .core_wr_data1(core_wr_data1),
+        .block_mode(block_mode), .block_two_stage(block_two_stage),
+        .block_in0(block_in0), .block_in1(block_in1),
+        .block_in2(block_in2), .block_in3(block_in3),
+        .block_tw_addr0(block_tw_addr0), .block_tw_addr1(block_tw_addr1),
+        .block_tw_addr2(block_tw_addr2), .block_tw_addr3(block_tw_addr3),
+        .tw_addr(tw_addr), .tw_negate(tw_negate),
+        .mul_a0(mul_a0), .mul_b0(mul_b0),
+        .mul_a1(mul_a1), .mul_b1(mul_b1),
+        .busy(busy), .done(done), .error(error),
+        .phase_dbg(phase_dbg), .pass_dbg(pass_dbg), .op_dbg(op_dbg)
+    );
+
+    // TW_AW and TW_MEMFILE remain in the public parameter list for project
+    // compatibility.  Kyber's fixed seven-bit zeta table is now authoritative.
 endmodule

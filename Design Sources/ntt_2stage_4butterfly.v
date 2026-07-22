@@ -12,6 +12,10 @@
 module ntt_2stage_4butterfly (
     input  wire        clk,
     input  wire        mode_in,
+    // Kyber has seven incomplete-NTT stages.  The first six stages are
+    // issued as three merged two-stage operations.  For the odd final stage,
+    // this input bypasses stage 1 while retaining the same registered block.
+    input  wire        two_stage_en,
 
     input  wire [11:0] in0,
     input  wire [11:0] in1,
@@ -31,6 +35,8 @@ module ntt_2stage_4butterfly (
 
     reg        mode_r0;
     reg        mode_r1;
+    reg        two_stage_en_r0;
+    reg        two_stage_en_r1;
     reg [11:0] in0_r, in1_r, in2_r, in3_r;
     reg [11:0] tw_s0_b0_r, tw_s0_b1_r;
     reg [11:0] tw_s1_b0_r0, tw_s1_b1_r0;
@@ -88,6 +94,7 @@ module ntt_2stage_4butterfly (
 
     always @(posedge clk) begin
         mode_r0 <= mode_in;
+        two_stage_en_r0 <= two_stage_en;
         in0_r <= in0;
         in1_r <= in1;
         in2_r <= in2;
@@ -98,6 +105,7 @@ module ntt_2stage_4butterfly (
         tw_s1_b1_r0 <= tw_s1_b1;
 
         mode_r1 <= mode_r0;
+        two_stage_en_r1 <= two_stage_en_r0;
         tw_s1_b0_r1 <= tw_s1_b0_r0;
         tw_s1_b1_r1 <= tw_s1_b1_r0;
 
@@ -113,7 +121,13 @@ module ntt_2stage_4butterfly (
             mid3 <= s0_b1_out1;
         end
 
-        if (mode_r1) begin
+        if (!two_stage_en_r1) begin
+            // Stage-0 values are already arranged in input-address order.
+            out0 <= mid0;
+            out1 <= mid1;
+            out2 <= mid2;
+            out3 <= mid3;
+        end else if (mode_r1) begin
             out0 <= s1_b0_out0;
             out1 <= s1_b1_out0;
             out2 <= s1_b0_out1;

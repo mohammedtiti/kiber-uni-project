@@ -118,8 +118,8 @@ module tb_RAM1;
     addr_a = 8'd10;
     addr_b = 8'd20;
     @(posedge clk); #1;
-    if (dout_a !== 12'd1234) $fatal("Parallel read A mismatch");
-    if (dout_b !== 12'd2222) $fatal("Parallel read B mismatch");
+    if (dout_a !== 12'd1234) $fatal(1, "Parallel read A mismatch");
+    if (dout_b !== 12'd2222) $fatal(1, "Parallel read B mismatch");
 
     // 5) Read-first check (same port reads+write same addr in same cycle)
     // Put known value first

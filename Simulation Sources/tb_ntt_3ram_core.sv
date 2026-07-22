@@ -35,8 +35,7 @@ module tb_ntt_3ram_core;
   ntt_3ram_core #(
     .AW(AW),
     .DW(DW),
-    .TW_AW(7),
-    .TW_MEMFILE("kiber_test.srcs/sources_1/imports/Desktop/twiddle_k2red.mem")
+    .TW_AW(7)
   ) dut (
     .clk(clk),
     .rst(rst),
@@ -121,6 +120,7 @@ module tb_ntt_3ram_core;
     cycles = 0;
     while (!done && !error && cycles < 20000) begin
       @(posedge clk);
+      #1;
       cycles = cycles + 1;
     end
 
@@ -136,7 +136,7 @@ module tb_ntt_3ram_core;
       $stop;
     end
 
-    $display("PASS: ntt_3ram_core FSM completed in %0d cycles.", cycles);
+    $display("PASS: ntt_3ram_core completion smoke test in %0d cycles.", cycles);
     $finish;
   end
 

@@ -9,6 +9,7 @@ module tb_ntt_2stage_4butterfly;
   always #5 clk = ~clk;
 
   reg        mode_in;
+  reg        two_stage_en;
   reg [11:0] in0, in1, in2, in3;
   reg [11:0] tw_s0_b0, tw_s0_b1, tw_s1_b0, tw_s1_b1;
   wire [11:0] out0, out1, out2, out3;
@@ -16,6 +17,7 @@ module tb_ntt_2stage_4butterfly;
   ntt_2stage_4butterfly dut (
     .clk(clk),
     .mode_in(mode_in),
+    .two_stage_en(two_stage_en),
     .in0(in0),
     .in1(in1),
     .in2(in2),
@@ -138,6 +140,7 @@ module tb_ntt_2stage_4butterfly;
 
       @(negedge clk);
       mode_in = mode_i;
+      two_stage_en = 1'b1;
       in0 = a0; in1 = a1; in2 = a2; in3 = a3;
       tw_s0_b0 = tw0; tw_s0_b1 = tw1; tw_s1_b0 = tw2; tw_s1_b1 = tw3;
 
@@ -154,10 +157,50 @@ module tb_ntt_2stage_4butterfly;
     end
   endtask
 
+  task automatic check_bypass(
+      input bit mode_i,
+      input [11:0] a0,
+      input [11:0] a1,
+      input [11:0] a2,
+      input [11:0] a3,
+      input [11:0] tw0,
+      input [11:0] tw1
+  );
+    reg [11:0] b00, b01, b10, b11;
+    reg [11:0] e0, e1, e2, e3;
+    begin
+      if (mode_i) begin
+        butterfly_ref(1'b1, a0, a1, tw0, b00, b01);
+        butterfly_ref(1'b1, a2, a3, tw1, b10, b11);
+        e0 = b00; e1 = b01; e2 = b10; e3 = b11;
+      end else begin
+        butterfly_ref(1'b0, a0, a2, tw0, b00, b01);
+        butterfly_ref(1'b0, a1, a3, tw1, b10, b11);
+        e0 = b00; e1 = b10; e2 = b01; e3 = b11;
+      end
+
+      @(negedge clk);
+      mode_in = mode_i;
+      two_stage_en = 1'b0;
+      in0 = a0; in1 = a1; in2 = a2; in3 = a3;
+      tw_s0_b0 = tw0; tw_s0_b1 = tw1;
+      tw_s1_b0 = 12'd0; tw_s1_b1 = 12'd0;
+      repeat (3) @(posedge clk);
+      #1;
+      if (out0 !== e0 || out1 !== e1 || out2 !== e2 || out3 !== e3) begin
+        $display("FAIL bypass mode=%0d got=%0d,%0d,%0d,%0d exp=%0d,%0d,%0d,%0d",
+                 mode_i, out0, out1, out2, out3, e0, e1, e2, e3);
+        $fatal(1);
+      end
+      two_stage_en = 1'b1;
+    end
+  endtask
+
   integer i;
 
   initial begin
     mode_in = 0;
+    two_stage_en = 1'b1;
     in0 = 0; in1 = 0; in2 = 0; in3 = 0;
     tw_s0_b0 = 0; tw_s0_b1 = 0; tw_s1_b0 = 0; tw_s1_b1 = 0;
 
@@ -173,6 +216,13 @@ module tb_ntt_2stage_4butterfly;
                    $urandom % Q, $urandom % Q, $urandom % Q, $urandom % Q);
       check_one(1, $urandom % Q, $urandom % Q, $urandom % Q, $urandom % Q,
                    $urandom % Q, $urandom % Q, $urandom % Q, $urandom % Q);
+    end
+
+    for (i = 0; i < 200; i = i + 1) begin
+      check_bypass(0, $urandom % Q, $urandom % Q, $urandom % Q, $urandom % Q,
+                      $urandom % Q, $urandom % Q);
+      check_bypass(1, $urandom % Q, $urandom % Q, $urandom % Q, $urandom % Q,
+                      $urandom % Q, $urandom % Q);
     end
 
     $display("PASS: ntt_2stage_4butterfly tests passed.");
